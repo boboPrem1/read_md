@@ -454,12 +454,23 @@ body {
 }
 .search-bar button:hover { background: var(--bg-hover); }
 
-/* ── Breadcrumb ── */
+/* ── Breadcrumb ──
+   Always rendered at a fixed height and stuck to the top of the scrolling
+   content pane (not a sibling row in the outer grid): letting it toggle
+   display:none/flex, or size itself from content, made the grid's implicit
+   auto-row grow/shrink with it and squeeze the content viewport whenever the
+   breadcrumb chain got deep/long. A fixed-height sticky header inside
+   `.content` can never do that. */
 .breadcrumb {
-  display: none;
+  display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
-  padding: 4px 16px;
+  padding: 0 16px;
+  height: 24px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-sans);
@@ -467,9 +478,7 @@ body {
   color: var(--text-muted);
   overflow: hidden;
   white-space: nowrap;
-  min-height: 24px;
 }
-.breadcrumb.visible { display: flex; }
 .breadcrumb-item { cursor: pointer; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .breadcrumb-item:hover { color: var(--accent); }
 .breadcrumb-sep { opacity: 0.4; font-size: 0.65rem; }
@@ -1463,9 +1472,6 @@ pre.line-numbers code .code-line::before {
 <button id="searchClose" aria-label="Fermer la recherche" title="Fermer">&times;</button>
 </div>
 
-<!-- Breadcrumb -->
-<div id="breadcrumb" class="breadcrumb" aria-label="Fil d'Ariane"></div>
-
 <!-- Sidebar (TOC) -->
 <nav id="sidebar" class="sidebar" aria-label="Table des matieres">
 <div class="sidebar-header">
@@ -1492,6 +1498,7 @@ pre.line-numbers code .code-line::before {
 
 <!-- Content -->
 <main id="content" class="content" tabindex="-1">
+<div id="breadcrumb" class="breadcrumb" aria-label="Fil d'Ariane"></div>
 <article id="article" class="article markdown-body"></article>
 </main>
 
@@ -5121,9 +5128,8 @@ const Breadcrumb = {
     const el = document.getElementById('breadcrumb');
     if (!el) return;
     const activeId = state.activeHeading;
-    if (!activeId) { el.classList.remove('visible'); return; }
-    const active = state.headings.find(h => h.id === activeId);
-    if (!active) { el.classList.remove('visible'); return; }
+    const active = activeId ? state.headings.find(h => h.id === activeId) : null;
+    if (!active) { el.innerHTML = ''; return; }
     const chain = [];
     const activeLevel = parseInt(active.tagName[1]);
     chain.push(active.textContent.replace(/^#\s*/, ''));
@@ -5138,7 +5144,6 @@ const Breadcrumb = {
       }
     }
     el.innerHTML = chain.map((t, i) => (i > 0 ? '<span class="breadcrumb-sep"></span>' : '') + '<span class="breadcrumb-item">' + escapeHtml(t) + '</span>').join('');
-    el.classList.add('visible');
   }
 };
 
