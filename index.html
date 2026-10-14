@@ -455,12 +455,12 @@ body {
 .search-bar button:hover { background: var(--bg-hover); }
 
 /* ── Breadcrumb ──
-   Always rendered at a fixed height and stuck to the top of the scrolling
-   content pane (not a sibling row in the outer grid): letting it toggle
-   display:none/flex, or size itself from content, made the grid's implicit
-   auto-row grow/shrink with it and squeeze the content viewport whenever the
-   breadcrumb chain got deep/long. A fixed-height sticky header inside
-   `.content` can never do that. */
+   Always rendered at a fixed height, as a normal (non-sticky) block at the
+   top of the scrolling content pane — not a sibling row in the outer grid:
+   letting it toggle display:none/flex, or size itself from content, made the
+   grid's implicit auto-row grow/shrink with it and squeeze the content
+   viewport whenever the breadcrumb chain got deep/long. A fixed-height block
+   inside `.content` can never do that. */
 .breadcrumb {
   display: flex;
   flex-shrink: 0;
@@ -468,9 +468,7 @@ body {
   gap: 4px;
   padding: 0 16px;
   height: 24px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  margin-bottom: 16px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-sans);
@@ -4939,6 +4937,22 @@ function showToast(msg) {
   toast.classList.add('visible');
   setTimeout(() => toast.classList.remove('visible'), 1500);
 }
+/**
+ * Switches to the reader shell with a spinner right away, before any async
+ * work (permission prompt, IndexedDB lookup, file read) starts — otherwise a
+ * recent-file reopen can sit silently for a moment with no visible feedback.
+ * `FileLoader.loadFile` re-renders this same markup once it takes over, so
+ * calling this first is a no-op flicker-wise, not a redundant extra state.
+ */
+function showDocumentLoading() {
+  const welcome = document.getElementById('welcome');
+  const reader = document.getElementById('reader');
+  const article = document.getElementById('article');
+  if (!welcome || !reader || !article) return;
+  article.innerHTML = '<div class="loading-indicator"><div class="loading-spinner"></div><span>Chargement du document...</span></div>';
+  welcome.classList.add('hidden');
+  reader.classList.remove('hidden');
+}
 function hashString(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
@@ -4993,15 +5007,70 @@ const Announcer = {
   }
 };
 
+// ── Handle store (IndexedDB) ──
+// localStorage can only hold strings, but a FileSystemFileHandle (File System
+// Access API) can be structured-cloned into IndexedDB — this is what lets a
+// "recent file" actually reopen itself on click instead of just being a
+// decorative, dead list entry.
+const HandleStore = {
+  _dbPromise: null,
+  _db() {
+    if (!this._dbPromise) {
+      this._dbPromise = new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) { reject(new Error('no-idb')); return; }
+        const req = indexedDB.open('mdreader-handles', 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore('handles'); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return this._dbPromise;
+  },
+  async set(name, handle) {
+    try {
+      const db = await this._db();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('handles', 'readwrite');
+        tx.objectStore('handles').put(handle, name);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {}
+  },
+  async get(name) {
+    try {
+      const db = await this._db();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction('handles', 'readonly');
+        const req = tx.objectStore('handles').get(name);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } catch { return null; }
+  },
+  async remove(name) {
+    try {
+      const db = await this._db();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('handles', 'readwrite');
+        tx.objectStore('handles').delete(name);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {}
+  }
+};
+
 const RecentFiles = {
   get() {
     try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; } catch { return []; }
   },
-  add(name, size) {
+  add(name, size, handle) {
     const list = this.get().filter(f => f.name !== name);
     list.unshift({ name, size, date: Date.now() });
     if (list.length > MAX_RECENT) list.length = MAX_RECENT;
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch {}
+    if (handle) HandleStore.set(name, handle);
     this.render();
   },
   clear() {
@@ -5020,8 +5089,34 @@ const RecentFiles = {
       return d + ' jours';
     };
     container.innerHTML = '<h3>Fichiers recents <button class="recent-file-clear" id="clearRecent">Effacer</button></h3>' +
-      files.map(f => '<div class="recent-file-item" data-name="' + escapeHtml(f.name) + '"><span class="recent-file-icon">📄</span><span class="recent-file-name">' + escapeHtml(f.name) + '</span><span class="recent-file-date">' + ago(f.date) + '</span></div>').join('');
+      files.map(f => '<div class="recent-file-item" data-name="' + escapeHtml(f.name) + '" tabindex="0" role="button" aria-label="Rouvrir ' + escapeHtml(f.name) + '"><span class="recent-file-icon">📄</span><span class="recent-file-name">' + escapeHtml(f.name) + '</span><span class="recent-file-date">' + ago(f.date) + '</span></div>').join('');
     document.getElementById('clearRecent')?.addEventListener('click', (e) => { e.stopPropagation(); this.clear(); });
+    container.querySelectorAll('.recent-file-item').forEach(item => {
+      const open = () => this.reopen(item.dataset.name);
+      item.addEventListener('click', open);
+      item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+  },
+  async reopen(name) {
+    showDocumentLoading();
+    const handle = await HandleStore.get(name);
+    if (handle) {
+      try {
+        let permission = await handle.queryPermission({ mode: 'read' });
+        if (permission !== 'granted') permission = await handle.requestPermission({ mode: 'read' });
+        if (permission === 'granted') {
+          const file = await handle.getFile();
+          FileLoader.loadFile(file, handle);
+          return;
+        }
+      } catch {
+        // handle stale (file moved/deleted/renamed) or permission refused — fall through to picker
+      }
+    }
+    document.getElementById('welcome')?.classList.remove('hidden');
+    document.getElementById('reader')?.classList.add('hidden');
+    showToast(handle ? 'Impossible de rouvrir automatiquement — sélectionnez le fichier' : 'Sélectionnez à nouveau « ' + name + ' »');
+    document.getElementById('fileInput')?.click();
   }
 };
 
@@ -6143,6 +6238,8 @@ const FocusMode = {
 };
 
 // ── File Loader ──
+const SUPPORTS_FS_ACCESS = typeof window.showOpenFilePicker === 'function';
+
 const FileLoader = {
   init() {
     const dropZone = document.getElementById('dropZone');
@@ -6151,9 +6248,9 @@ const FileLoader = {
     const newFileBtn = document.getElementById('newFileBtn');
     const newFileInput = document.getElementById('newFileInput');
 
-    if (fileBtn) fileBtn.addEventListener('click', () => fileInput.click());
+    if (fileBtn) fileBtn.addEventListener('click', () => this.pickFile());
     if (fileInput) fileInput.addEventListener('change', (e) => { if (e.target.files[0]) this.loadFile(e.target.files[0]); });
-    if (newFileBtn) newFileBtn.addEventListener('click', () => newFileInput?.click());
+    if (newFileBtn) newFileBtn.addEventListener('click', () => this.pickFile());
     if (newFileInput) newFileInput.addEventListener('change', (e) => { if (e.target.files[0]) this.loadFile(e.target.files[0]); });
 
     if (dropZone) {
@@ -6164,7 +6261,7 @@ const FileLoader = {
         dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag-over'); });
       });
       dropZone.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) this.loadFile(e.dataTransfer.files[0]); });
-      dropZone.addEventListener('click', (e) => { if (e.target === dropZone || !e.target.closest('button')) fileInput.click(); });
+      dropZone.addEventListener('click', (e) => { if (e.target === dropZone || !e.target.closest('button')) this.pickFile(); });
     }
 
     document.body.addEventListener('dragover', (e) => { e.preventDefault(); });
@@ -6174,7 +6271,25 @@ const FileLoader = {
     });
   },
 
-  loadFile(file) {
+  async pickFile() {
+    if (SUPPORTS_FS_ACCESS) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'Markdown', accept: { 'text/markdown': ACCEPTED_EXTENSIONS, 'text/plain': ACCEPTED_EXTENSIONS } }],
+          excludeAcceptAllOption: false,
+        });
+        const file = await handle.getFile();
+        this.loadFile(file, handle);
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        // any other failure: fall through to the classic <input type="file"> picker
+      }
+    }
+    document.getElementById('fileInput')?.click();
+  },
+
+  loadFile(file, handle) {
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!ACCEPTED_EXTENSIONS.includes(ext)) {
       alert('Format non pris en charge. Veuillez utiliser un fichier Markdown (.md, .markdown, .txt).');
@@ -6188,11 +6303,11 @@ const FileLoader = {
     const reader = document.getElementById('reader');
     const article = document.getElementById('article');
 
-    if (file.size > 5 * 1024 * 1024) {
-      article.innerHTML = '<div class="loading-indicator"><div class="loading-spinner"></div><span>Chargement du document...</span></div>';
-      welcome.classList.add('hidden');
-      reader.classList.remove('hidden');
-    }
+    // Always show the spinner immediately, not just for files > 5 Mo — on a
+    // slow device or a cold IndexedDB/permission round-trip (recent-file
+    // reopen), even a "small" file can take long enough that a silent gap
+    // reads as "nothing happened".
+    showDocumentLoading();
 
     const fileReader = new FileReader();
     fileReader.onload = (e) => {
@@ -6210,7 +6325,7 @@ const FileLoader = {
           TOC.build(article);
           Announcer.say(file.name + ' chargé');
           ReadingProgress.estimateTime(text);
-          RecentFiles.add(file.name, file.size);
+          RecentFiles.add(file.name, file.size, handle);
           Bookmarks.load();
           Bookmarks.renderPanel();
           Annotations.load();
