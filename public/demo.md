@@ -22,6 +22,10 @@ Ce document teste l'ensemble des fonctionnalités du Lecteur Markdown Premium. I
 - [Notes de bas de page](#notes-de-bas-de-page)
 - [HTML intégré](#html-integre)
 - [Caractères spéciaux](#caracteres-speciaux)
+- [Définitions et abréviations](#definitions-et-abreviations)
+- [Contenu mixte avancé](#contenu-mixte-avance)
+- [Langages supplémentaires](#langages-supplementaires)
+- [Section longue pour tester la navigation](#section-longue-pour-tester-la-navigation)
 
 ---
 
@@ -391,6 +395,74 @@ graph TD
     J --> K[Affichage]
 ```
 
+### Diagramme de séquence
+
+```mermaid
+sequenceDiagram
+    participant U as Utilisateur
+    participant F as FileLoader
+    participant P as MarkdownEngine
+    participant R as PostProcessor
+    participant D as DOM
+
+    U->>F: Glisser-déposer fichier.md
+    F->>F: Lire le contenu (FileReader)
+    F->>P: Texte brut Markdown
+    P->>P: Extraire le frontmatter
+    P->>P: Parser avec marked
+    P->>R: HTML brut
+    R->>R: Coloration syntaxique (hljs)
+    R->>R: Formules KaTeX
+    R->>R: Diagrammes Mermaid
+    R->>R: Assainissement (DOMPurify)
+    R->>D: HTML sécurisé
+    D->>U: Document rendu
+```
+
+### Diagramme de classes
+
+```mermaid
+classDiagram
+    class Reader {
+        -theme: string
+        -fontSize: number
+        +loadFile(file: File)
+        +render(markdown: string)
+        +setTheme(name: string)
+    }
+    class Parser {
+        +parse(text: string): string
+        +tokenize(text: string): Token[]
+    }
+    class PostProcessor {
+        +highlight(html: string): string
+        +renderMath(html: string): string
+        +sanitize(html: string): string
+    }
+    class TOC {
+        -headings: Heading[]
+        +build(article: Element)
+        +scrollTo(id: string)
+    }
+
+    Reader --> Parser
+    Reader --> PostProcessor
+    Reader --> TOC
+```
+
+### Diagramme circulaire
+
+```mermaid
+pie title Répartition de la taille du fichier
+    "highlight.js" : 122
+    "KaTeX" : 275
+    "Mermaid" : 3300
+    "marked" : 48
+    "DOMPurify" : 18
+    "Code applicatif" : 85
+    "CSS" : 50
+```
+
 ---
 
 ## Images et médias
@@ -399,9 +471,13 @@ graph TD
 
 ![Logo Markdown — un M stylisé](https://via.placeholder.com/400x200/4285f4/ffffff?text=Markdown+Reader "Exemple d'image avec légende")
 
-### Image manquante (test de résilience)
+### Image redimensionnée
 
-![Cette image n'existe pas](./image-inexistante.png)
+![Petite icône](https://via.placeholder.com/100x100/34a853/ffffff?text=OK)
+
+### Image locale
+
+![Dodge Ram 1500 TRX](./dodge-ram-1500-trx-4000x2370-16826.jpg)
 
 ---
 
@@ -510,28 +586,321 @@ $\frac{x}{$
 
 ---
 
-## Section longue pour tester la navigation
+## Définitions et abréviations
 
-### Sous-section 1
+Terme simple
+: Une définition sur une seule ligne.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam euismod, nisi vel consectetur interdum, nisl nunc egestas nisi, euismod aliquam nisi nisl sit amet nisl. Nullam euismod, nisi vel consectetur interdum, nisl nunc egestas nisi, euismod aliquam nisi nisl sit amet nisl.
+Markdown
+: Langage de balisage léger créé par John Gruber en 2004.
+: Permet d'écrire du contenu formaté avec une syntaxe lisible en texte brut.
 
-### Sous-section 2
+CommonMark
+: Spécification standardisée du langage Markdown, visant à éliminer les ambiguïtés de la syntaxe originale.
 
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
-
-### Sous-section 3
-
-Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.
-
-### Sous-section 4
-
-At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.
-
-### Sous-section 5
-
-Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus.
+GFM (GitHub Flavored Markdown)
+: Extension de CommonMark utilisée par GitHub, ajoutant le support des tableaux, listes de tâches, barré et autolinks.
 
 ---
 
-*Fin du document de démonstration. Ce fichier couvre tous les niveaux de titres, les listes imbriquées, les tâches, les citations, les alertes, les blocs de code dans plusieurs langages, les tableaux complexes, les formules mathématiques, un diagramme Mermaid, les notes de bas de page, le HTML intégré, les caractères Unicode et les syntaxes mal formées.*
+## Contenu mixte avancé
+
+### Liste avec du code et des formules
+
+1. La complexité temporelle du tri rapide est en moyenne $O(n \log n)$, ce qui le rend efficace pour la plupart des cas :
+   ```python
+   def quicksort(arr):
+       if len(arr) <= 1:
+           return arr
+       pivot = arr[len(arr) // 2]
+       left = [x for x in arr if x < pivot]
+       middle = [x for x in arr if x == pivot]
+       right = [x for x in arr if x > pivot]
+       return quicksort(left) + middle + quicksort(right)
+   ```
+
+2. La formule de Stirling approxime la factorielle pour les grands nombres :
+   $$n! \approx \sqrt{2\pi n} \left(\frac{n}{e}\right)^n$$
+
+3. En TypeScript, les types génériques permettent la réutilisabilité :
+   ```typescript
+   interface Repository<T extends { id: string }> {
+     findById(id: string): Promise<T | null>;
+     save(entity: T): Promise<void>;
+     delete(id: string): Promise<boolean>;
+   }
+
+   class InMemoryRepo<T extends { id: string }> implements Repository<T> {
+     private store = new Map<string, T>();
+
+     async findById(id: string) {
+       return this.store.get(id) ?? null;
+     }
+     async save(entity: T) {
+       this.store.set(entity.id, entity);
+     }
+     async delete(id: string) {
+       return this.store.delete(id);
+     }
+   }
+   ```
+
+### Citation avec du code
+
+> Pour vérifier si un nombre est premier en $O(\sqrt{n})$ :
+>
+> ```python
+> def is_prime(n: int) -> bool:
+>     if n < 2:
+>         return False
+>     for i in range(2, int(n**0.5) + 1):
+>         if n % i == 0:
+>             return False
+>     return True
+> ```
+>
+> — *Algorithmes fondamentaux*, chapitre 3
+
+### Tableau avec formules
+
+| Loi | Formule | Domaine |
+|:---|:---:|:---|
+| Newton (gravitation) | $F = G\frac{m_1 m_2}{r^2}$ | Mécanique classique |
+| Coulomb | $F = k_e\frac{q_1 q_2}{r^2}$ | Électrostatique |
+| Boltzmann | $S = k_B \ln \Omega$ | Thermodynamique |
+| Schrödinger | $i\hbar\frac{\partial}{\partial t}\Psi = \hat{H}\Psi$ | Mécanique quantique |
+| Maxwell-Faraday | $\nabla \times \mathbf{E} = -\frac{\partial \mathbf{B}}{\partial t}$ | Électromagnétisme |
+
+---
+
+## Langages supplémentaires
+
+### Rust
+
+```rust
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+struct Document {
+    title: String,
+    content: String,
+    word_count: usize,
+    metadata: HashMap<String, String>,
+}
+
+impl Document {
+    fn new(title: &str, content: &str) -> Self {
+        let word_count = content.split_whitespace().count();
+        Self {
+            title: title.to_string(),
+            content: content.to_string(),
+            word_count,
+            metadata: HashMap::new(),
+        }
+    }
+
+    fn reading_time(&self, wpm: usize) -> std::time::Duration {
+        let minutes = self.word_count / wpm;
+        std::time::Duration::from_secs((minutes * 60) as u64)
+    }
+}
+
+fn main() {
+    let mut doc = Document::new("Démo", "Ceci est un document de test.");
+    doc.metadata.insert("author".into(), "Équipe".into());
+    println!("{:#?}", doc);
+    println!("Temps de lecture : {:?}", doc.reading_time(250));
+}
+```
+
+### Go
+
+```go
+package main
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+)
+
+type FileInfo struct {
+	Name     string
+	Size     int64
+	Hash     string
+	Words    int
+}
+
+func analyzeFile(path string) (*FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	content, err := io.ReadAll(io.TeeReader(f, h))
+	if err != nil {
+		return nil, err
+	}
+
+	stat, _ := f.Stat()
+	return &FileInfo{
+		Name:  stat.Name(),
+		Size:  stat.Size(),
+		Hash:  fmt.Sprintf("%x", h.Sum(nil)),
+		Words: len(strings.Fields(string(content))),
+	}, nil
+}
+
+func main() {
+	info, err := analyzeFile("demo.md")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("File: %s (%d bytes, %d words)\nSHA256: %s\n",
+		info.Name, info.Size, info.Words, info.Hash)
+}
+```
+
+### HTML
+
+```html
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lecteur Markdown</title>
+  <style>
+    :root {
+      --bg: #fff;
+      --fg: #1a1a2e;
+    }
+    body {
+      font-family: Georgia, serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      color: var(--fg);
+      background: var(--bg);
+    }
+  </style>
+</head>
+<body>
+  <main id="content" role="main">
+    <article class="markdown-body"></article>
+  </main>
+  <script type="module" src="./reader.js"></script>
+</body>
+</html>
+```
+
+### YAML
+
+```yaml
+app:
+  name: Lecteur Markdown Premium
+  version: 1.0.0
+  description: >
+    Lecteur Markdown autonome, élégant et performant,
+    fonctionnant entièrement côté client.
+
+features:
+  rendering:
+    - CommonMark compliant
+    - GitHub Flavored Markdown
+    - KaTeX math formulas
+    - Mermaid diagrams
+    - Syntax highlighting (190+ languages)
+  ui:
+    themes: [light, dark, sepia, contrast]
+    font_sizes: { min: 14, max: 24, default: 18 }
+    sidebar: true
+    minimap: true
+    focus_mode: true
+  storage:
+    type: IndexedDB + localStorage
+    persistence:
+      - file_handles
+      - bookmarks
+      - annotations
+      - reading_positions
+      - preferences
+```
+
+### Diff
+
+```diff
+--- a/src/reader.ts
++++ b/src/reader.ts
+@@ -42,7 +42,9 @@ class MarkdownEngine {
+   init() {
+     marked.setOptions({
+       gfm: true,
+-      breaks: false
++      breaks: false,
++      pedantic: false,
++      mangle: false
+     });
+   }
+
+-  render(text: string): string {
++  async render(text: string): Promise<string> {
+     const frontmatter = this.extractFrontmatter(text);
+-    return marked.parse(text);
++    const html = await marked.parse(text);
++    return DOMPurify.sanitize(html);
+   }
+```
+
+---
+
+## Section longue pour tester la navigation
+
+### Sous-section 1 — Architecture du lecteur
+
+Le lecteur Markdown Premium repose sur une architecture modulaire où chaque composant gère un aspect spécifique de l'application. Le module `FileLoader` gère l'entrée des fichiers via le glisser-déposer, le sélecteur de fichiers natif et l'API File System Access pour la persistance des handles. Le `MarkdownEngine` configure marked avec les options GFM et gère l'extraction du frontmatter YAML.
+
+Le `PostProcessor` est le cœur du pipeline de rendu : il prend le HTML brut produit par marked et lui applique successivement la coloration syntaxique via highlight.js, le rendu des formules mathématiques via KaTeX, le rendu des diagrammes via Mermaid, les alertes GFM stylisées, la typographie française automatique (espaces insécables avant les ponctuations doubles), et enfin l'assainissement via DOMPurify pour prévenir toute injection XSS.
+
+### Sous-section 2 — Gestion des thèmes
+
+Le système de thèmes utilise des variables CSS personnalisées définies sur `:root`. Quatre thèmes sont disponibles : **Clair** (fond blanc, texte sombre), **Sombre** (fond bleu-nuit, texte clair), **Sépia** (fond beige chaud, texte brun) et **Contraste** (fond noir pur, texte blanc pur, conçu pour l'accessibilité). Le changement de thème est instantané grâce à la modification d'un unique attribut `data-theme` sur l'élément racine.
+
+Les préférences de thème sont persistées dans le `localStorage` et restaurées automatiquement au chargement. Le thème par défaut respecte la préférence système via `prefers-color-scheme`. Les blocs de code adaptent également leur coloration au thème actif pour maintenir une cohérence visuelle.
+
+### Sous-section 3 — Système de signets et annotations
+
+Les signets permettent de marquer des positions spécifiques dans un document. Chaque signet est associé à un hash du fichier, au texte du titre le plus proche, et à la position de défilement. Les signets sont stockés dans le `localStorage` et affichés dans le panneau latéral sous la table des matières.
+
+Les annotations vont plus loin : l'utilisateur sélectionne du texte, ajoute un commentaire, et l'annotation est ancrée au contenu via un identifiant de position. Les annotations sont surlignées dans le document et peuvent être éditées ou supprimées depuis le panneau dédié. La persistance se fait également via le `localStorage`, indexée par le hash du fichier.
+
+### Sous-section 4 — Performances et optimisations
+
+Pour les documents volumineux (>100 000 mots), plusieurs optimisations sont en place :
+
+- **Debounce et throttle** sur les événements fréquents (scroll, resize, input) pour limiter les recalculs
+- **IntersectionObserver** pour le suivi de la section active dans la table des matières, évitant un recalcul coûteux à chaque événement scroll
+- **Rendu différé** des diagrammes Mermaid qui sont processés de manière asynchrone
+- **Minimap** qui utilise un canvas redimensionné pour visualiser la structure du document sans recréer le DOM
+- **Cache de position** pour restaurer instantanément la dernière position de lecture d'un fichier déjà ouvert
+
+Le lecteur reste réactif même avec des documents dépassant 500 Ko de Markdown brut, grâce à ces optimisations appliquées à chaque étape du pipeline.
+
+### Sous-section 5 — Accessibilité
+
+L'accessibilité est une priorité du lecteur :
+
+- Tous les boutons ont des attributs `aria-label` descriptifs
+- La navigation au clavier est complète : <kbd>T</kbd> pour la table des matières, <kbd>S</kbd> pour les réglages, <kbd>F</kbd> pour le mode focus, <kbd>?</kbd> pour l'aide
+- Un module `Announcer` utilise une zone `aria-live` pour signaler les actions aux lecteurs d'écran (changement de thème, ouverture de panneau, résultats de recherche)
+- Les contrastes de couleurs respectent les recommandations WCAG AA dans tous les thèmes
+- Le thème « Contraste » offre un mode WCAG AAA pour les utilisateurs avec des déficiences visuelles sévères
+- Le mode focus réduit les distractions en masquant tout sauf le paragraphe en cours de lecture
+
+---
+
+*Fin du document de démonstration. Ce fichier couvre l'ensemble des fonctionnalités du Lecteur Markdown Premium : titres imbriqués, listes (à puces, numérotées, tâches), citations et alertes GFM, blocs de code dans 10 langages (JavaScript, Python, SQL, CSS, Bash, JSON, Rust, Go, HTML, YAML, diff), tableaux simples et complexes, formules mathématiques en ligne et en bloc, diagrammes Mermaid (flux, séquence, classes, circulaire), images, notes de bas de page, HTML intégré, caractères Unicode, définitions, contenu mixte avancé et syntaxes mal formées.*
