@@ -1,0 +1,11 @@
+export { HandleStore } from './handle-store';
+export type { RecentFile } from './recent-files';
+export { getRecentFiles, addRecentFile, clearRecentFiles, removeRecentFile } from './recent-files';
+export { PositionManager } from './positions';
+export { Preferences, READING_DEFAULTS, FONT_SIZE_RANGE } from './preferences';
+export type { Bookmark } from './bookmarks';
+export { loadBookmarks, saveBookmarks } from './bookmarks';
+export type { Annotation } from './annotations';
+export { loadAnnotations, saveAnnotations } from './annotations';
+export type { SavedDir, SavedDirFile } from './github-dirs';
+export { GithubDirsStore } from './github-dirs';
