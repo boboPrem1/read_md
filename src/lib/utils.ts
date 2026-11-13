@@ -1,6 +1,3 @@
-// ── Pure utility functions extracted from reader-app.ts ──
-// Phase 1: extraction only — reader-app.ts is not modified.
-
 // ── Function utilities ──
 
 export function debounce(fn: (...args: unknown[]) => void, ms: number) {

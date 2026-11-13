@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PositionManager } from '../lib/storage/positions';
 import { WORDS_PER_MINUTE } from '../lib/constants';
-import { scrollBehavior, throttle } from '../lib/utils';
+import { scrollBehavior, showToast, throttle } from '../lib/utils';
 
 export interface UseReadingProgressReturn {
   fraction: number;
@@ -67,43 +67,46 @@ export function useReadingProgress(
   const [showBackToTop, setShowBackToTop] = useState<boolean>(false);
 
   const fileHashRef = useRef(fileHash);
-  fileHashRef.current = fileHash;
-
   const totalWordsRef = useRef(totalWords);
-  totalWordsRef.current = totalWords;
+  // Stay false until the saved scroll position has been applied, so the first
+  // measurement cannot overwrite it with 0.
+  const canSaveRef = useRef(false);
 
-  const update = useCallback(() => {
-    const el = contentRef.current;
-    if (!el) return;
+  useEffect(() => {
+    fileHashRef.current = fileHash;
+    totalWordsRef.current = totalWords;
+  });
 
-    const frac = contentFraction(el);
-    const percent = Math.round(frac * 100);
-    const scrollable = el.scrollHeight > el.clientHeight;
-    const remaining = computeRemainingText(frac, totalWordsRef.current, scrollable);
-    const backToTop = el.scrollTop > el.clientHeight;
+  const updateRef = useRef<() => void>(() => {});
 
-    setFraction(frac);
-    setProgressPercent(percent);
-    setRemainingText(remaining);
-    setShowBackToTop(backToTop);
+  useEffect(() => {
+    updateRef.current = () => {
+      const el = contentRef.current;
+      if (!el) return;
 
-    // Save position if fileHash is set
-    if (fileHashRef.current) {
-      PositionManager.save(fileHashRef.current, frac);
-    }
+      const frac = contentFraction(el);
+      const percent = Math.round(frac * 100);
+      const scrollable = el.scrollHeight > el.clientHeight;
+      const remaining = computeRemainingText(frac, totalWordsRef.current, scrollable);
+      const backToTop = el.scrollTop > el.clientHeight;
 
-    // Synchronize DOM attributes / bars if present
-    if (typeof document !== 'undefined') {
-      const fill = document.getElementById('progressFill');
-      if (fill) {
-        fill.style.width = `${percent}%`;
+      setFraction(frac);
+      setProgressPercent(percent);
+      setRemainingText(remaining);
+      setShowBackToTop(backToTop);
+
+      if (fileHashRef.current && canSaveRef.current) {
+        PositionManager.save(fileHashRef.current, frac);
       }
-      const readingLine = document.querySelector('.reading-line');
-      if (readingLine) {
-        readingLine.setAttribute('aria-valuenow', String(percent));
+
+      if (typeof document !== 'undefined') {
+        const fill = document.getElementById('progressFill');
+        if (fill) fill.style.width = `${percent}%`;
+        const readingLine = document.querySelector('.reading-line');
+        if (readingLine) readingLine.setAttribute('aria-valuenow', String(percent));
       }
-    }
-  }, [contentRef]);
+    };
+  });
 
   // Throttled scroll listener
   useEffect(() => {
@@ -111,30 +114,70 @@ export function useReadingProgress(
     if (!el) return;
 
     const throttledUpdate = throttle(() => {
-      update();
+      updateRef.current();
     }, 100);
 
     el.addEventListener('scroll', throttledUpdate, { passive: true });
-    // Run an initial computation
-    update();
+    updateRef.current();
 
     return () => {
       el.removeEventListener('scroll', throttledUpdate);
+      if (canSaveRef.current && fileHashRef.current) {
+        PositionManager.save(fileHashRef.current, contentFraction(el));
+      }
     };
-  }, [contentRef, update]);
+  }, [contentRef]);
+
+  // Restore the saved fraction once the article has a scrollable height.
+  // This effect is registered before the recalculation below so that effect
+  // cannot save a 0 fraction for the new document.
+  useEffect(() => {
+    canSaveRef.current = false;
+    if (!fileHash) return;
+    let frame = 0;
+    let attempts = 0;
+    let cancelled = false;
+
+    const apply = () => {
+      if (cancelled) return;
+      const node = contentRef.current;
+      if (!node || fileHashRef.current !== fileHash) return;
+      const saved = PositionManager.get(fileHash);
+      const max = node.scrollHeight - node.clientHeight;
+      const needsScroll = saved != null && saved > 0.02;
+      if (needsScroll && max <= 0 && attempts < 4) {
+        attempts += 1;
+        frame = requestAnimationFrame(apply);
+        return;
+      }
+      if (max > 0) node.scrollTop = max * (saved ?? 0);
+      canSaveRef.current = true;
+      if (needsScroll) {
+        showToast(`Reprise à ${Math.round((saved ?? 0) * 100)} %`, {
+          action: 'Revenir au début',
+          onAction: () => node.scrollTo({ top: 0, behavior: scrollBehavior() }),
+        });
+      }
+    };
+
+    frame = requestAnimationFrame(apply);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [fileHash, contentRef]);
 
   // Recalculate when fileHash or totalWords change
   useEffect(() => {
-    update();
-  }, [fileHash, totalWords, update]);
+    updateRef.current();
+  }, [fileHash, totalWords]);
 
-  const scrollToTop = useCallback(() => {
-    if (!contentRef.current) return;
-    contentRef.current.scrollTo({
+  const scrollToTop = () => {
+    contentRef.current?.scrollTo({
       top: 0,
       behavior: scrollBehavior(),
     });
-  }, [contentRef]);
+  };
 
   return {
     fraction,

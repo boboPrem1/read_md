@@ -1,19 +1,28 @@
 'use client';
 
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Toolbar, type ReaderMode } from './Toolbar';
 import { ProgressBar } from './ProgressBar';
 import { SearchBar } from './SearchBar';
 import { Sidebar, type SidebarTab } from './Sidebar';
 import { ArticleContent } from './ArticleContent';
 import { SettingsPanel } from './SettingsPanel';
+import { EditorPane } from '../editor/EditorPane';
+import { PresentationMode } from '../presentation/PresentationMode';
+import { Lightbox } from '../dialogs/Lightbox';
+import { StatsDialog } from '../dialogs/StatsDialog';
+import { ShortcutsDialog } from '../dialogs/ShortcutsDialog';
 
-import { useDocument, useDocumentDispatch } from '../../contexts/document-context';
+import { useDocument } from '../../contexts/document-context';
 import { useReadingProgress } from '../../hooks/use-reading-progress';
 import { useSearch } from '../../hooks/use-search';
 import { useBookmarks } from '../../hooks/use-bookmarks';
 import { useImmersion } from '../../hooks/use-immersion';
-import type { UseAnnotationsResult } from '../../hooks/use-annotations';
+import { useFocusMode } from '../../hooks/use-focus-mode';
+import { usePreferences } from '../../hooks/use-preferences';
+import { useKeyboard } from '../../hooks/use-keyboard';
+import { pickMarkdownFile } from '../../lib/pick-markdown-file';
+import type { Annotation } from '../../lib/storage/annotations';
 
 export interface ReaderViewProps {
   fileName?: string;
@@ -22,7 +31,7 @@ export interface ReaderViewProps {
   dirty?: boolean;
   onHome?: () => void;
   onOpenFile?: () => void;
-  onFileSelect?: (file: File) => void;
+  onFileSelect?: (file: File, handle?: FileSystemFileHandle | null) => void;
   mode?: ReaderMode;
   onModeChange?: (mode: ReaderMode) => void;
   onToggleFullscreen?: () => void;
@@ -48,29 +57,16 @@ export function ReaderView({
   onPrint,
   className = '',
 }: ReaderViewProps) {
-  // Try reading from DocumentContext if present
-  let contextState = null;
-  let contextDispatch = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    contextState = useDocument();
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    contextDispatch = useDocumentDispatch();
-  } catch {
-    // Rendered outside DocumentProvider; fallback to local state / props
-  }
+  const documentState = useDocument();
 
-  const fileName = propFileName ?? contextState?.fileName ?? '';
-  const fileHash = propFileHash ?? contextState?.fileHash ?? '';
-  const rawContent = propRawContent ?? contextState?.rawContent ?? '';
-  const isDirty = propDirty ?? contextState?.dirty ?? false;
+  const fileName = propFileName ?? documentState.fileName;
+  const fileHash = propFileHash ?? documentState.fileHash;
+  const rawContent = propRawContent ?? documentState.rawContent;
+  const isDirty = propDirty ?? documentState.dirty;
 
-  // Refs for DOM nodes
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const contentRef = useRef<HTMLElement | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
 
-  // Local UI states
   const [headings, setHeadings] = useState<Element[]>([]);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [totalWords, setTotalWords] = useState<number>(0);
@@ -79,37 +75,39 @@ export function ReaderView({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentMode, setCurrentMode] = useState<ReaderMode>('read');
   const [navHistory, setNavHistory] = useState<number[]>([]);
-  const [annotationsResult, setAnnotationsResult] = useState<UseAnnotationsResult | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const removeAnnotationRef = useRef<((id: number, silent?: boolean) => void) | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const activeMode = propMode ?? currentMode;
 
-  const handleModeChange = (newMode: ReaderMode) => {
-    setCurrentMode(newMode);
-    onModeChange?.(newMode);
-    if (contextDispatch) {
-      if (newMode === 'edit') {
-        contextDispatch({ type: 'TOGGLE_EDITOR' });
-      } else if (newMode === 'present') {
-        contextDispatch({ type: 'TOGGLE_PRESENTATION' });
-      }
-    }
-  };
+  const setMode = useCallback(
+    (mode: ReaderMode) => {
+      setCurrentMode(mode);
+      onModeChange?.(mode);
+    },
+    [onModeChange]
+  );
 
-  // Immersion hook
   const immersion = useImmersion({ contentRef });
+  const focus = useFocusMode();
+  const prefs = usePreferences();
 
-  // Reading progress hook
-  const { progressPercent, remainingText, showBackToTop, scrollToTop } =
-    useReadingProgress({
-      contentRef,
-      fileHash,
-      totalWords,
-    });
+  const { progressPercent, remainingText, showBackToTop, scrollToTop } = useReadingProgress({
+    contentRef,
+    fileHash,
+    totalWords,
+  });
 
-  // Search hook
   const search = useSearch({ articleRef });
+  const clearSearch = search.clear;
 
-  // Current active heading element
+  useEffect(() => {
+    clearSearch();
+  }, [rawContent, clearSearch]);
+
   const activeHeadingEl = useMemo(() => {
     return headings.find((h) => h.id === activeHeadingId) || null;
   }, [headings, activeHeadingId]);
@@ -118,10 +116,8 @@ export function ReaderView({
     ? (activeHeadingEl.textContent || '').replace(/^#\s*/, '').trim()
     : undefined;
 
-  // Bookmarks hook
   const bookmarksManager = useBookmarks(fileHash, contentRef, activeHeadingText);
 
-  // Navigation history tracking
   const rememberPosition = useCallback(() => {
     if (contentRef.current) {
       setNavHistory((prev) => [...prev, contentRef.current!.scrollTop]);
@@ -135,29 +131,23 @@ export function ReaderView({
     contentRef.current.scrollTo({ top: last, behavior: 'smooth' });
   }, [navHistory]);
 
-  // Headings extracted callback
-  const handleHeadingsExtracted = useCallback(
-    (extracted: Element[]) => {
-      setHeadings(extracted);
-      if (contextDispatch) {
-        contextDispatch({ type: 'SET_HEADINGS', payload: extracted });
-      }
-    },
-    [contextDispatch]
-  );
+  const handleImageClick = useCallback((src: string, alt: string) => {
+    setLightbox({ src, alt });
+  }, []);
 
-  // Word count callback
-  const handleTotalWordsCalculated = useCallback(
-    (words: number) => {
-      setTotalWords(words);
-      if (contextDispatch) {
-        contextDispatch({ type: 'SET_TOTAL_WORDS', payload: words });
+  const handleHeadingsExtracted = useCallback((extracted: Element[]) => {
+    setHeadings((prev) => {
+      if (prev.length === extracted.length && prev.every((heading, index) => heading === extracted[index])) {
+        return prev;
       }
-    },
-    [contextDispatch]
-  );
+      return extracted;
+    });
+  }, []);
 
-  // Scroll handler for sync active heading & immersion
+  const handleTotalWordsCalculated = useCallback((words: number) => {
+    setTotalWords(words);
+  }, []);
+
   const handleScroll = (e: React.UIEvent<HTMLElement>) => {
     immersion.onScroll(e);
 
@@ -171,14 +161,9 @@ export function ReaderView({
       current = h;
     }
 
-    const newActiveId = current ? current.id : null;
-    setActiveHeadingId(newActiveId);
-    if (contextDispatch) {
-      contextDispatch({ type: 'SET_ACTIVE_HEADING', payload: newActiveId });
-    }
+    setActiveHeadingId(current ? current.id : null);
   };
 
-  // Heading selection in ToC
   const handleSelectHeading = useCallback(
     (heading: Element) => {
       rememberPosition();
@@ -190,7 +175,6 @@ export function ReaderView({
     [rememberPosition]
   );
 
-  // Bookmark jump
   const handleGoToBookmark = useCallback(
     (pos: number) => {
       rememberPosition();
@@ -206,7 +190,14 @@ export function ReaderView({
     [rememberPosition]
   );
 
-  // Annotation jump
+  const handleAnnotationsChange = useCallback((
+    next: Annotation[],
+    remove: (id: number, silent?: boolean) => void,
+  ) => {
+    removeAnnotationRef.current = remove;
+    setAnnotations(next);
+  }, []);
+
   const handleGoToAnnotation = useCallback(
     (id: number) => {
       rememberPosition();
@@ -224,31 +215,102 @@ export function ReaderView({
   const handleOpenFileInput = () => {
     if (onOpenFile) {
       onOpenFile();
-    } else {
-      fileInputRef.current?.click();
+      return;
     }
+    void pickMarkdownFile().then((picked) => {
+      if (picked) onFileSelect?.(picked.file, picked.handle);
+    });
   };
 
-  return (
-    <div id="reader" className={`reader ${className}`.trim()}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        id="newFileInput"
-        className="hidden-input"
-        tabIndex={-1}
-        aria-hidden="true"
-        accept=".md,.markdown,.mdown,.mkd,.mkdn,.mdwn,.mdtxt,.mdtext,.text,.txt"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            onFileSelect?.(file);
-            e.target.value = '';
-          }
-        }}
-      />
+  const download = useCallback(() => {
+    const blob = new Blob([rawContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'document.md';
+    a.click();
+    URL.revokeObjectURL(url);
+    documentState.markClean();
+  }, [rawContent, fileName, documentState]);
 
-      {/* Toolbar */}
+  const toggleFullscreen = useCallback(() => {
+    if (onToggleFullscreen) {
+      onToggleFullscreen();
+      return;
+    }
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen();
+    } else {
+      void document.exitFullscreen();
+    }
+  }, [onToggleFullscreen]);
+
+  useKeyboard({
+    enabled: activeMode !== 'present',
+    onOpenFile: handleOpenFileInput,
+    onOpenSearch: () => search.open(),
+    onNextSearch: () => search.next(),
+    onPrevSearch: () => search.prev(),
+    onToggleBookmark: () => bookmarksManager.toggleBookmark(),
+    onToggleSidebar: () => setSidebarOpen((open) => !open),
+    onToggleSettings: () => setSettingsOpen((open) => !open),
+    onToggleMinimal: () => immersion.toggleMinimal(),
+    onZoomIn: () => prefs.stepFontSize(1),
+    onZoomOut: () => prefs.stepFontSize(-1),
+    onScrollToTop: scrollToTop,
+    onToggleFocus: () => focus.toggleFocusMode(),
+    onNavigateBack: handleNavBack,
+    onToggleStats: () => {
+      if (onToggleStats) onToggleStats();
+      else setStatsOpen((open) => !open);
+    },
+    onToggleEditor: () => setMode(activeMode === 'edit' ? 'read' : 'edit'),
+    onTogglePresentation: () => setMode(activeMode === 'present' ? 'read' : 'present'),
+    onToggleShortcuts: () => {
+      if (onToggleShortcuts) onToggleShortcuts();
+      else setShortcutsOpen((open) => !open);
+    },
+    onEscape: (e) => {
+      if (lightbox) {
+        setLightbox(null);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (shortcutsOpen) {
+        setShortcutsOpen(false);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (statsOpen) {
+        setStatsOpen(false);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (search.isOpen) {
+        search.close();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (activeMode === 'edit') {
+        setMode('read');
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+  });
+
+  return (
+    <div id="reader" className={`reader ${activeMode === 'edit' ? 'split-layout' : ''} ${className}`.trim()}>
       <Toolbar
         onHome={onHome}
         docName={fileName}
@@ -261,41 +323,31 @@ export function ReaderView({
         }}
         readingRemaining={remainingText}
         mode={activeMode}
-        onModeChange={handleModeChange}
+        onModeChange={setMode}
         isBookmarked={bookmarksManager.isCurrentPositionBookmarked}
         onToggleBookmark={bookmarksManager.toggleBookmark}
         isSidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         isSearchOpen={search.isOpen}
         onToggleSearch={() => {
-          if (search.isOpen) {
-            search.close();
-          } else {
-            search.open();
-          }
+          if (search.isOpen) search.close();
+          else search.open();
         }}
         isSettingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((prev) => !prev)}
         onOpenFile={handleOpenFileInput}
         onToggleImmersive={() => immersion.toggleMinimal()}
-        onToggleFocus={() => {
-          if (contextDispatch) {
-            contextDispatch({ type: 'TOGGLE_FOCUS' });
-          }
-        }}
-        onToggleStats={onToggleStats}
-        onPrint={onPrint}
-        onToggleFullscreen={onToggleFullscreen}
-        onToggleShortcuts={onToggleShortcuts}
+        onToggleFocus={() => focus.toggleFocusMode()}
+        onToggleStats={onToggleStats ?? (() => setStatsOpen((open) => !open))}
+        onPrint={onPrint ?? (() => window.print())}
+        onToggleFullscreen={toggleFullscreen}
+        onToggleShortcuts={onToggleShortcuts ?? (() => setShortcutsOpen((open) => !open))}
       />
 
-      {/* Progress Bar */}
       <ProgressBar progressPercent={progressPercent} />
 
-      {/* Search Bar */}
       <SearchBar search={search} />
 
-      {/* Sidebar */}
       <Sidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -305,15 +357,17 @@ export function ReaderView({
         bookmarks={bookmarksManager.bookmarks}
         onGoToBookmark={handleGoToBookmark}
         onRemoveBookmark={bookmarksManager.removeBookmark}
-        annotations={annotationsResult?.annotations ?? []}
+        annotations={annotations}
         onGoToAnnotation={handleGoToAnnotation}
-        onRemoveAnnotation={annotationsResult?.removeAnnotation}
+        onRemoveAnnotation={(id) => removeAnnotationRef.current?.(id)}
         activeTab={sidebarTab}
         onTabChange={setSidebarTab}
       />
 
-      {/* Reader Stage */}
       <div className="reader-stage">
+        {activeMode === 'edit' ? (
+          <EditorPane rawContent={rawContent} onChange={documentState.updateContent} onDownload={download} />
+        ) : null}
         <ArticleContent
           rawContent={rawContent}
           fileHash={fileHash}
@@ -325,16 +379,41 @@ export function ReaderView({
           onNavBack={handleNavBack}
           onScrollToTop={scrollToTop}
           showBackToTop={showBackToTop}
+          onImageClick={handleImageClick}
+          onAnchorClick={rememberPosition}
           onScroll={handleScroll}
-          onAnnotationsReady={setAnnotationsResult}
+          onAnnotationsChange={handleAnnotationsChange}
         />
       </div>
 
-      {/* Settings Panel */}
       <SettingsPanel
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        theme={prefs.theme}
+        onThemeChange={prefs.setTheme}
+        fontSize={prefs.fontSize}
+        onStepFontSize={prefs.stepFontSize}
+        contentWidth={prefs.contentWidth}
+        onContentWidthChange={prefs.setContentWidth}
+        lineHeight={prefs.lineHeight}
+        onLineHeightChange={prefs.setLineHeight}
+        fontFamily={prefs.fontFamily}
+        onFontFamilyChange={prefs.setFontFamily}
+        isMinimal={immersion.isMinimal}
+        onToggleMinimal={immersion.toggleMinimal}
+        isFocusMode={focus.isFocusMode}
+        onToggleFocusMode={focus.toggleFocusMode}
+        onResetPreferences={prefs.resetPreferences}
       />
+
+      <PresentationMode
+        isOpen={activeMode === 'present'}
+        rawContent={rawContent}
+        onClose={() => setMode('read')}
+      />
+      <Lightbox src={lightbox?.src ?? null} alt={lightbox?.alt ?? ''} onClose={() => setLightbox(null)} />
+      <StatsDialog isOpen={statsOpen} rawContent={rawContent} onClose={() => setStatsOpen(false)} />
+      <ShortcutsDialog isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }

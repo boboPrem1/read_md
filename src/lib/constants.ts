@@ -1,4 +1,17 @@
 export const ACCEPTED_EXTENSIONS = ['.md','.markdown','.mdown','.mkd','.mkdn','.mdwn','.mdtxt','.mdtext','.text','.txt'];
+
+// Each extension may appear only once. Repeating the same list under two MIME
+// types makes showOpenFilePicker throw, and the app then falls back to an
+// <input type="file">, which cannot remember a permission.
+export const MARKDOWN_PICKER_TYPES = [
+  {
+    description: 'Markdown',
+    accept: {
+      'text/markdown': ['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdwn', '.mdtxt', '.mdtext'],
+      'text/plain': ['.text', '.txt'],
+    },
+  },
+];
 export const WORDS_PER_MINUTE = 230;
 export const PREFS_KEY = 'mdreader_prefs';
 export const POSITIONS_KEY = 'mdreader_positions';

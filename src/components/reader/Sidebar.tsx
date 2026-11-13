@@ -83,7 +83,7 @@ export function Sidebar({
     <>
       <nav
         id="sidebar"
-        className={`sidebar ${isOpen ? '' : 'collapsed'} ${className}`.trim()}
+        className={`sidebar ${isOpen ? 'mobile-open' : 'collapsed'} ${className}`.trim()}
         aria-label="Navigation du document"
       >
         <div className="sidebar-header">
@@ -287,7 +287,7 @@ export function Sidebar({
         id="sidebarOverlay"
         className={`sidebar-overlay ${isOpen ? '' : 'hidden'}`.trim()}
         onClick={onClose}
-        aria-hidden="true"
+        aria-hidden={!isOpen}
       />
     </>
   );

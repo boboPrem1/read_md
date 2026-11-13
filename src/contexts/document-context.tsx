@@ -4,292 +4,139 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
+  useRef,
 } from 'react';
 
-import type { Bookmark } from '../lib/storage/bookmarks';
-import type { Annotation } from '../lib/storage/annotations';
+import { ACCEPTED_EXTENSIONS } from '../lib/constants';
+import { addRecentFile } from '../lib/storage/recent-files';
+import { hashString } from '../lib/utils';
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export type { Bookmark, Annotation };
-
-export interface ReaderState {
+export interface DocumentState {
   fileName: string;
   fileHash: string;
   rawContent: string;
-  headings: Element[];
-  activeHeading: string | null;
-  searchResults: Element[];
-  searchIndex: number;
-  sidebarOpen: boolean;
-  settingsOpen: boolean;
-  searchOpen: boolean;
-  minimalMode: boolean;
-  lightboxOpen: boolean;
-  shortcutsOpen: boolean;
-  focusMode: boolean;
-  navHistory: number[];
-  totalWords: number;
-  bookmarks: Bookmark[];
-  annotations: Annotation[];
-  statsOpen: boolean;
-  editorOpen: boolean;
-  presentationOpen: boolean;
-  presentationSlide: number;
-  regexSearch: boolean;
   dirty: boolean;
   isLoading: boolean;
 }
 
-// ── Actions ────────────────────────────────────────────────────────────────
-
-export type ReaderAction =
-  | { type: 'SET_FILE'; payload: { fileName: string; fileHash: string; rawContent: string } }
+type DocumentAction =
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_HEADINGS'; payload: Element[] }
-  | { type: 'SET_ACTIVE_HEADING'; payload: string | null }
-  | { type: 'SET_BOOKMARKS'; payload: Bookmark[] }
-  | { type: 'SET_ANNOTATIONS'; payload: Annotation[] }
-  | { type: 'SET_SEARCH'; payload: { results: Element[]; index: number } }
-  | { type: 'TOGGLE_SIDEBAR' }
-  | { type: 'TOGGLE_SETTINGS' }
-  | { type: 'TOGGLE_SEARCH' }
-  | { type: 'TOGGLE_MINIMAL' }
-  | { type: 'TOGGLE_FOCUS' }
-  | { type: 'TOGGLE_LIGHTBOX' }
-  | { type: 'TOGGLE_SHORTCUTS' }
-  | { type: 'TOGGLE_STATS' }
-  | { type: 'TOGGLE_EDITOR' }
-  | { type: 'TOGGLE_PRESENTATION'; payload?: { slide?: number } }
-  | { type: 'SET_DIRTY'; payload: boolean }
-  | { type: 'NAV_PUSH'; payload: number }
-  | { type: 'NAV_BACK' }
-  | { type: 'SET_TOTAL_WORDS'; payload: number };
+  | { type: 'SET_FILE'; payload: { fileName: string; fileHash: string; rawContent: string } }
+  | { type: 'SET_CONTENT'; payload: string }
+  | { type: 'SET_DIRTY'; payload: boolean };
 
-// ── Initial state ──────────────────────────────────────────────────────────
-
-const initialState: ReaderState = {
+const initialState: DocumentState = {
   fileName: '',
   fileHash: '',
   rawContent: '',
-  headings: [],
-  activeHeading: null,
-  searchResults: [],
-  searchIndex: -1,
-  sidebarOpen: true,
-  settingsOpen: false,
-  searchOpen: false,
-  minimalMode: false,
-  lightboxOpen: false,
-  shortcutsOpen: false,
-  focusMode: false,
-  navHistory: [],
-  totalWords: 0,
-  bookmarks: [],
-  annotations: [],
-  statsOpen: false,
-  editorOpen: false,
-  presentationOpen: false,
-  presentationSlide: 0,
-  regexSearch: false,
   dirty: false,
   isLoading: false,
 };
 
-// ── Reducer ────────────────────────────────────────────────────────────────
-
-function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
+function documentReducer(state: DocumentState, action: DocumentAction): DocumentState {
   switch (action.type) {
+    case 'SET_LOADING':
+      return { ...state, isLoading: action.payload };
     case 'SET_FILE':
       return {
-        ...state,
         fileName: action.payload.fileName,
         fileHash: action.payload.fileHash,
         rawContent: action.payload.rawContent,
-        // Reset per-document state
-        headings: [],
-        activeHeading: null,
-        searchResults: [],
-        searchIndex: -1,
-        bookmarks: [],
-        annotations: [],
-        navHistory: [],
         dirty: false,
+        isLoading: false,
       };
-
-    case 'SET_LOADING':
-      return { ...state, isLoading: action.payload };
-
-    case 'SET_HEADINGS':
-      return { ...state, headings: action.payload };
-
-    case 'SET_ACTIVE_HEADING':
-      return { ...state, activeHeading: action.payload };
-
-    case 'SET_BOOKMARKS':
-      return { ...state, bookmarks: action.payload };
-
-    case 'SET_ANNOTATIONS':
-      return { ...state, annotations: action.payload };
-
-    case 'SET_SEARCH':
-      return {
-        ...state,
-        searchResults: action.payload.results,
-        searchIndex: action.payload.index,
-      };
-
-    case 'TOGGLE_SIDEBAR':
-      return { ...state, sidebarOpen: !state.sidebarOpen };
-
-    case 'TOGGLE_SETTINGS':
-      return { ...state, settingsOpen: !state.settingsOpen };
-
-    case 'TOGGLE_SEARCH':
-      return { ...state, searchOpen: !state.searchOpen };
-
-    case 'TOGGLE_MINIMAL':
-      return { ...state, minimalMode: !state.minimalMode };
-
-    case 'TOGGLE_FOCUS':
-      return { ...state, focusMode: !state.focusMode };
-
-    case 'TOGGLE_LIGHTBOX':
-      return { ...state, lightboxOpen: !state.lightboxOpen };
-
-    case 'TOGGLE_SHORTCUTS':
-      return { ...state, shortcutsOpen: !state.shortcutsOpen };
-
-    case 'TOGGLE_STATS':
-      return { ...state, statsOpen: !state.statsOpen };
-
-    case 'TOGGLE_EDITOR':
-      return { ...state, editorOpen: !state.editorOpen };
-
-    case 'TOGGLE_PRESENTATION':
-      return {
-        ...state,
-        presentationOpen: !state.presentationOpen,
-        presentationSlide: action.payload?.slide ?? state.presentationSlide,
-      };
-
+    case 'SET_CONTENT':
+      return { ...state, rawContent: action.payload, dirty: true };
     case 'SET_DIRTY':
       return { ...state, dirty: action.payload };
-
-    case 'NAV_PUSH':
-      return { ...state, navHistory: [...state.navHistory, action.payload] };
-
-    case 'NAV_BACK': {
-      const history = state.navHistory.slice(0, -1);
-      return { ...state, navHistory: history };
-    }
-
-    case 'SET_TOTAL_WORDS':
-      return { ...state, totalWords: action.payload };
-
     default:
       return state;
   }
 }
 
-// ── Context value type ─────────────────────────────────────────────────────
-
-interface DocumentContextValue {
-  state: ReaderState;
-  dispatch: React.Dispatch<ReaderAction>;
-  loadFile: (file: File, handle?: FileSystemFileHandle | null) => Promise<void>;
+interface DocumentApi {
+  loadFile: (file: File, handle?: FileSystemFileHandle | null) => Promise<boolean>;
+  updateContent: (content: string) => void;
+  markClean: () => void;
 }
 
-// ── Context — React 19 safe pattern (never null) ───────────────────────────
-
-function missingProvider(): never {
-  throw new Error('useDocument / useDocumentDispatch must be used within a <DocumentProvider>');
-}
-
-const DocumentStateContext = createContext<ReaderState>(initialState);
-const DocumentDispatchContext = createContext<React.Dispatch<ReaderAction>>(
-  missingProvider as unknown as React.Dispatch<ReaderAction>
-);
-const DocumentApiContext = createContext<Pick<DocumentContextValue, 'loadFile'>>({
-  loadFile: missingProvider as unknown as DocumentContextValue['loadFile'],
-});
-
-// ── Provider ───────────────────────────────────────────────────────────────
+const DocumentStateContext = createContext<DocumentState | null>(null);
+const DocumentApiContext = createContext<DocumentApi | null>(null);
 
 export function DocumentProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(readerReducer, initialState);
+  const [state, dispatch] = useReducer(documentReducer, initialState);
+  const stateRef = useRef(state);
+  const loadingRef = useRef(false);
 
-  /**
-   * loadFile — reads the file, hashes the content, dispatches SET_FILE, then
-   * loads persisted bookmarks / annotations for that document.
-   *
-   * Heavy work (markdown rendering, word-count) is done by the components that
-   * consume the state; this function only handles I/O and state bootstrap.
-   */
+  useEffect(() => {
+    stateRef.current = state;
+  });
+
   const loadFile = useCallback(
-    async (file: File, _handle?: FileSystemFileHandle | null): Promise<void> => {
+    async (file: File, handle?: FileSystemFileHandle | null): Promise<boolean> => {
+      const ext = '.' + (file.name.split('.').pop() ?? '').toLowerCase();
+      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+        window.alert('Format non pris en charge. Veuillez utiliser un fichier Markdown (.md, .markdown, .txt).');
+        return false;
+      }
+      if (
+        stateRef.current.dirty &&
+        !window.confirm('Vos modifications non téléchargées seront perdues. Ouvrir ce fichier quand même ?')
+      ) {
+        return false;
+      }
+      if (loadingRef.current) return false;
+      loadingRef.current = true;
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
         const rawContent = await file.text();
-
-        // Simple djb2-style hash for change detection (matches reader-app.ts)
-        let hash = 5381;
-        for (let i = 0; i < rawContent.length; i++) {
-          hash = ((hash << 5) + hash) ^ rawContent.charCodeAt(i);
-        }
-        const fileHash = (hash >>> 0).toString(36);
-
+        const fileHash = hashString(rawContent);
+        addRecentFile(file.name, file.size, handle);
         dispatch({
           type: 'SET_FILE',
           payload: { fileName: file.name, fileHash, rawContent },
         });
-
-        // Load persisted data for this document (dynamic import avoids SSR issues)
-        const [{ loadBookmarks }, { loadAnnotations }] = await Promise.all([
-          import('../lib/storage/bookmarks'),
-          import('../lib/storage/annotations'),
-        ]);
-
-        dispatch({ type: 'SET_BOOKMARKS', payload: loadBookmarks(fileHash) });
-        dispatch({ type: 'SET_ANNOTATIONS', payload: loadAnnotations(fileHash) });
-      } finally {
+        document.title = `${file.name} — Lecteur Markdown`;
+        return true;
+      } catch {
         dispatch({ type: 'SET_LOADING', payload: false });
+        window.alert('Impossible de lire ce fichier.');
+        return false;
+      } finally {
+        loadingRef.current = false;
       }
     },
     []
   );
 
-  const api = useMemo(() => ({ loadFile }), [loadFile]);
+  const updateContent = useCallback((content: string) => {
+    dispatch({ type: 'SET_CONTENT', payload: content });
+  }, []);
+
+  const markClean = useCallback(() => {
+    dispatch({ type: 'SET_DIRTY', payload: false });
+  }, []);
+
+  const api = useMemo(
+    () => ({ loadFile, updateContent, markClean }),
+    [loadFile, updateContent, markClean]
+  );
 
   return (
     <DocumentStateContext.Provider value={state}>
-      <DocumentDispatchContext.Provider value={dispatch}>
-        <DocumentApiContext.Provider value={api}>
-          {children}
-        </DocumentApiContext.Provider>
-      </DocumentDispatchContext.Provider>
+      <DocumentApiContext.Provider value={api}>{children}</DocumentApiContext.Provider>
     </DocumentStateContext.Provider>
   );
 }
 
-// ── Hooks ──────────────────────────────────────────────────────────────────
-
-/**
- * useDocument — returns the full reader state plus the loadFile API.
- * Re-renders whenever any part of the state changes.
- */
-export function useDocument(): ReaderState & Pick<DocumentContextValue, 'loadFile'> {
+export function useDocument(): DocumentState & DocumentApi {
   const state = useContext(DocumentStateContext);
-  const { loadFile } = useContext(DocumentApiContext);
-  return useMemo(() => ({ ...state, loadFile }), [state, loadFile]);
-}
-
-/**
- * useDocumentDispatch — returns only the dispatch function.
- * Components that only dispatch actions will NOT re-render on state changes.
- */
-export function useDocumentDispatch(): React.Dispatch<ReaderAction> {
-  return useContext(DocumentDispatchContext);
+  const api = useContext(DocumentApiContext);
+  if (!state || !api) {
+    throw new Error('useDocument must be used within a <DocumentProvider>');
+  }
+  return useMemo(() => ({ ...state, ...api }), [state, api]);
 }

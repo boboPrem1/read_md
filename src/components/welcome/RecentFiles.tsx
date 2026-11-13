@@ -7,7 +7,8 @@ import {
   removeRecentFile,
   type RecentFile,
 } from '../../lib/storage/recent-files';
-import { HandleStore } from '../../lib/storage/handle-store';
+import { HandleStore, reopenRecentFile } from '../../lib/storage/handle-store';
+import { pickMarkdownFile } from '../../lib/pick-markdown-file';
 import { showToast } from '../../lib/utils';
 
 export interface RecentFilesProps {
@@ -22,15 +23,11 @@ function formatAgo(ts: number): string {
 }
 
 export function RecentFiles({ onOpenFile }: RecentFilesProps) {
-  const [files, setFiles] = useState<RecentFile[]>([]);
+  const [files, setFiles] = useState<RecentFile[]>(() => getRecentFiles());
 
   const refresh = useCallback(() => {
     setFiles(getRecentFiles());
   }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   const handleClear = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -44,40 +41,27 @@ export function RecentFiles({ onOpenFile }: RecentFilesProps) {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    void HandleStore.preload(getRecentFiles().map((file) => file.name));
+  }, []);
+
   const handleReopen = useCallback(async (name: string) => {
-    const handle = await HandleStore.get(name);
-    if (handle) {
-      try {
-        const queryMode = { mode: 'read' as const };
-        let permission = await (handle as unknown as {
-          queryPermission: (opt: { mode: string }) => Promise<PermissionState>;
-          requestPermission: (opt: { mode: string }) => Promise<PermissionState>;
-          getFile: () => Promise<File>;
-        }).queryPermission(queryMode);
-
-        if (permission !== 'granted') {
-          permission = await (handle as unknown as {
-            requestPermission: (opt: { mode: string }) => Promise<PermissionState>;
-          }).requestPermission(queryMode);
-        }
-
-        if (permission === 'granted') {
-          const file = await (handle as unknown as {
-            getFile: () => Promise<File>;
-          }).getFile();
-          onOpenFile(file, handle);
-          return;
-        }
-      } catch {
-        /* ignore error and show fallback */
-      }
+    const result = await reopenRecentFile(name);
+    if (result.status === 'opened') {
+      onOpenFile(result.file, result.handle);
+      return;
     }
-
+    if (result.status === 'needs-gesture') {
+      showToast(`Cliquez à nouveau sur « ${name} » pour l’autoriser.`);
+      return;
+    }
     showToast(
-      handle
+      result.status === 'denied'
         ? 'Impossible de rouvrir automatiquement — sélectionnez le fichier'
         : `Sélectionnez à nouveau « ${name} »`
     );
+    const picked = await pickMarkdownFile();
+    if (picked) onOpenFile(picked.file, picked.handle);
   }, [onOpenFile]);
 
   if (files.length === 0) {

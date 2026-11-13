@@ -4,7 +4,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Icon } from './Icon';
 import { renderMarkdown } from '../../lib/markdown/engine';
 import { postProcess } from '../../lib/markdown/post-process';
-import { useAnnotations, type UseAnnotationsResult } from '../../hooks/use-annotations';
+import { useAnnotations } from '../../hooks/use-annotations';
+import type { Annotation } from '../../lib/storage/annotations';
 
 export interface ArticleContentProps {
   rawContent: string;
@@ -18,8 +19,12 @@ export interface ArticleContentProps {
   onScrollToTop?: () => void;
   showBackToTop?: boolean;
   onImageClick?: (src: string, alt: string) => void;
+  onAnchorClick?: () => void;
   onScroll?: (e: React.UIEvent<HTMLElement>) => void;
-  onAnnotationsReady?: (annotations: UseAnnotationsResult) => void;
+  onAnnotationsChange?: (
+    annotations: Annotation[],
+    removeAnnotation: (id: number, silent?: boolean) => void,
+  ) => void;
   className?: string;
 }
 
@@ -35,8 +40,9 @@ export function ArticleContent({
   onScrollToTop,
   showBackToTop = false,
   onImageClick,
+  onAnchorClick,
   onScroll,
-  onAnnotationsReady,
+  onAnnotationsChange,
   className = '',
 }: ArticleContentProps) {
   const internalContentRef = useRef<HTMLElement | null>(null);
@@ -55,43 +61,46 @@ export function ArticleContent({
     fileHash,
     articleRef: activeArticleRef,
   });
+  const { annotations, removeAnnotation, applyAnnotations } = annotationsResult;
+  const onAnchorClickRef = useRef(onAnchorClick);
+  const onImageClickRef = useRef(onImageClick);
+  const onHeadingsRef = useRef(onHeadingsExtracted);
+  const onWordsRef = useRef(onTotalWordsCalculated);
 
   useEffect(() => {
-    onAnnotationsReady?.(annotationsResult);
-  }, [annotationsResult, onAnnotationsReady]);
+    onAnchorClickRef.current = onAnchorClick;
+    onImageClickRef.current = onImageClick;
+    onHeadingsRef.current = onHeadingsExtracted;
+    onWordsRef.current = onTotalWordsCalculated;
+  });
+
+  useEffect(() => {
+    onAnnotationsChange?.(annotations, removeAnnotation);
+  }, [annotations, removeAnnotation, onAnnotationsChange]);
 
   // Post process markdown HTML (katex, mermaid, prism/hljs, anchors, copy buttons, etc.)
   useEffect(() => {
-    const articleEl = activeArticleRef.current;
+    const articleEl = document.getElementById('article');
     if (!articleEl) return;
 
     postProcess(articleEl, rendered.mathBlocks, {
-      onImageClick,
-      onAnchorClick: () => {
-        // Can be hooked up to navigation history
-      },
+      onImageClick: (src, alt) => onImageClickRef.current?.(src, alt),
+      onAnchorClick: () => onAnchorClickRef.current?.(),
     });
 
-    // Extract headings for table of contents
     const headings = Array.from(
       articleEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
     ).filter((h) => h.id);
-    onHeadingsExtracted?.(headings);
+    onHeadingsRef.current?.(headings);
 
-    // Compute word count
     const words = rawContent ? rawContent.trim().split(/\s+/).filter(Boolean).length : 0;
-    onTotalWordsCalculated?.(words);
+    onWordsRef.current?.(words);
+  }, [rendered, rawContent]);
 
-    // Apply any loaded annotations onto the newly rendered DOM
-    annotationsResult.applyAnnotations();
-  }, [
-    rendered,
-    rawContent,
-    activeArticleRef,
-    onHeadingsExtracted,
-    onTotalWordsCalculated,
-    onImageClick,
-  ]);
+  // Runs after postProcess so highlights survive the DOM tweaks above.
+  useEffect(() => {
+    applyAnnotations();
+  }, [applyAnnotations, rendered]);
 
   const handleScrollToTop = () => {
     if (onScrollToTop) {
